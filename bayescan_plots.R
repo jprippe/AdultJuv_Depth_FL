@@ -1,0 +1,23 @@
+setwd("~/Google Drive/Work/~Research/~Projects_Active/AdultJuv_Depth_FL/work/")
+#install.packages("boa")
+library(boa)
+source('plot_R.r')
+dat=read.table("./ssid/ss.baye_fst.txt",header=T)
+head(dat)
+table(dat[,"qval"]<0.05)
+outs=which(dat[,"qval"]<0.05)
+top100=sort(as.numeric(rownames(head(dat[order(dat$qval,-dat$fst),], 100))))
+plot_bayescan("./ssid/ss.baye_fst.txt",FDR=0.05,add_text=F,size=0.5,highlight=outs)
+write.table(top100, "./ssid/ss.top100.fst", row.names = F, col.names = F)
+
+#----------------
+mydata=read.table("./ssid/ss.baye.sel",colClasses="numeric")
+parameter="Fst1"
+head(mydata)
+#quartz()
+plot(density(mydata[,parameter]), xlab=parameter, main=paste(parameter,"posterior distribution"),xlim=c(0,0.4),ylim=c(0,500))
+lines(density(mydata[,"Fst2"]))
+lines(density(mydata[,"Fst3"]))
+lines(density(mydata[,"Fst4"]))
+#lines(density(mydata[,"Fst5"]))
+boa.hpd(mydata[,parameter],0.05)
