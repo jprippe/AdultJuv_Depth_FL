@@ -1,7 +1,7 @@
 # read about multimodel inference here: 
 # https://pdfs.semanticscholar.org/a696/9a3b5720162eaa75deec3a607a9746dae95e.pdf
 
-setwd("~/Google Drive/Work/~Research/~Projects_Active/AdultJuv_Depth_FL/work/mcav/moments/PairwisePops/c23/")
+setwd("set1/mcav/moments/c23/")
 weight.cutoff=1e-2 # lowest Akaike weight to report a model
 npl=read.table("likes")
 
