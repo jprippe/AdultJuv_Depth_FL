@@ -4,3 +4,8 @@
 .Ruserdata
 .DS_Store
 .DS_Store?
+*.RData
+*.pptx
+*.png
+*.pdf
+**/allSSID
