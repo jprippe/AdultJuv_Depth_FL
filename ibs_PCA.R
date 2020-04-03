@@ -2,7 +2,7 @@ require(vegan)
 require(ggplot2)
 
 #---------------
-spp <- 'ssid' #choose species
+spp <- 'mcav' #choose species
 npops <- 4 #choose number of populations
 #---------------
 
@@ -16,7 +16,7 @@ if(spp=='ssid'){
   bams <- sub(".fastq.bt2.bam","",bams)
   }
 
-ibsMat <- as.matrix(read.table(paste0(dir,prefix,"nc.ibsMat")))
+ibsMat <- as.matrix(read.table(paste0(dir,prefix,"1.ibsMat")))
 dimnames(ibsMat) <- list(bams,bams)
 
 hc <- hclust(as.dist(ibsMat),"ave")
@@ -83,11 +83,12 @@ pp0.admix <- data.frame(id=bams, age=substr(bams,4,4), habitat=substr(bams,3,3),
 admix.spider <- merge(pp0.admix, aggregate(cbind(mean.x=pp0$CA$u[,axes2plot[1]], mean.y=pp0$CA$u[,axes2plot[2]])~admix, pp0.admix, mean), by='admix')
 ggplot(data=admix.spider)+
   theme_bw()+
+  theme(panel.grid = element_blank(), axis.title = element_blank())+
   geom_segment(aes_string(x='mean.x', y='mean.y', xend=colnames(pp0$CA$u)[axes2plot[1]], yend=colnames(pp0$CA$u)[axes2plot[2]]), col='grey90')+
   geom_point(aes_string(x=colnames(pp0$CA$u)[axes2plot[1]], y=colnames(pp0$CA$u)[axes2plot[2]], shape='age', col='habitat'), size = 2)+
   geom_label(aes(x=mean.x, y=mean.y, label=admix))+
   scale_color_manual(values = c('skyblue1', 'palegreen1', 'plum1'))
-ggsave(paste0(dir, prefix, 'PCA_k', npops, '_admix.png'), height = 6, width = 8)
+ggsave(paste0(dir, prefix, 'PCA_k', npops, '_admix_fig1.png'), height = 3, width = 4)
 
 #--------------
 # k-means clustering (instead of admixture-based)
@@ -134,25 +135,25 @@ p <- plotly_build(fig)
 p$x$data[[2]]$marker$symbol <- 'diamond'
 p
 
-######## To make a gif...
-#install.packages('processx')
-library(processx)
-
-zoom <- 0.5
-for(i in seq(0,0.1,by=0.1)){
-  # 6.3 is enough for a full 360 rotation
-  outfile <- paste("PCA_plot",i, sep = "_")
-  fig <- plot_ly(ks.spider, x = ~MDS1, y = ~MDS2, z = ~MDS3, mode = 'markers', color = ~habitat, symbol = ~age, 
-                 colors = c('skyblue1', 'palegreen1', 'plum1'), marker = list(size=4))
-  fig <- fig %>% add_markers()
-  fig <- fig %>% layout(scene=list(xaxis = list(title = 'MDS1'),
-                                   yaxis = list(title = 'MDS2'),
-                                   zaxis = list(title = 'MDS3'),
-                                   camera = list(eye = list(x = cos(i)*zoom, y = sin(i)*zoom, z= 0.25)))) #needs to be fixed
+#Output a rotational image series to create a gif
+for(i in seq(0,6.3,by=0.1)){
+  outfile <- paste("PCA",round(i,digits=2), sep = "_")
+  cam.zoom = 2
+  ver.angle = 0
+  fig <- plot_ly(admix.spider, x = ~MDS1, y = ~MDS2, z = ~MDS3, 
+                 mode = 'markers', color = ~region, symbol = ~rz, 
+                 colors = c('skyblue1', 'palegreen1', 'plum1'), marker = list(size=4)) %>% 
+    add_markers() %>% 
+    layout(scene = list(xaxis = list(title = 'MDS1'),
+                        yaxis = list(title = 'MDS2'),
+                        zaxis = list(title = 'MDS3'),
+                        camera = list(eye = list(x = cos(i)*cam.zoom,y = sin(i)*cam.zoom, z=0.2),
+                                      center = list(x = 0, y = 0, z = 0))))
   p <- plotly_build(fig)
   p$x$data[[2]]$marker$symbol <- 'diamond'
   p
-  orca(p, paste(outfile,"png", sep="."))
+  
+  cat("Now rendering iteration:", i,"\n")
+  orca(fig, paste(outfile,"png", sep="."), width = 1200, height = 1050)
 }
-
 

@@ -130,3 +130,44 @@ ggsave(paste0(prefix, 'PCA_k', npops, '_kmeans.png'), height = 6, width = 8)
 
 newClusters=data.frame(cbind(bams,"kmeans"=ks$cluster,"admix"=cluster.admix))
 write.table(newClusters,quote=F,row.names=F,file=paste0("newClusters_k", npops, "_", spp, ".tab"))
+
+# 3D PCA in plot.ly -------------------------------------------------------
+
+library(plotly)
+
+fig <- plot_ly(admix.spider, x = ~MDS1, y = ~MDS2, z = ~MDS3, 
+               mode = 'markers', color = ~region, symbol = ~rz, 
+               colors = c('#F8766D','#00BFC4'), marker = list(size=4)) %>% 
+  add_markers() %>% 
+  layout(scene = list(xaxis = list(title = 'MDS1'),
+                      yaxis = list(title = 'MDS2'),
+                      zaxis = list(title = 'MDS3'),
+                      camera = list(eye = list(x = cos(i)*cam.zoom,y = sin(i)*cam.zoom, z=0.2),
+                                    center = list(x = 0, y = 0, z = 0))))
+p <- plotly_build(fig)
+p$x$data[[2]]$marker$symbol <- 'diamond'
+p
+
+#Output a rotational image series to create a gif
+for(i in seq(0,6.3,by=0.1)){
+  outfile <- paste("PCA",round(i,digits=2), sep = "_")
+  cam.zoom = 2
+  ver.angle = 0
+  fig <- plot_ly(admix.spider, x = ~MDS1, y = ~MDS2, z = ~MDS3, 
+                 mode = 'markers', color = ~region, symbol = ~rz, 
+                 colors = c('#F8766D','#00BFC4'), marker = list(size=4)) %>% 
+    add_markers() %>% 
+    layout(scene = list(xaxis = list(title = 'MDS1'),
+                        yaxis = list(title = 'MDS2'),
+                        zaxis = list(title = 'MDS3'),
+                        camera = list(eye = list(x = cos(i)*cam.zoom,y = sin(i)*cam.zoom, z=0.2),
+                                      center = list(x = 0, y = 0, z = 0))))
+  p <- plotly_build(fig)
+  p$x$data[[2]]$marker$symbol <- 'diamond'
+  p
+  
+  cat("Now rendering iteration:", i,"\n")
+  orca(fig, paste(outfile,"png", sep="."), width = 1200, height = 1050)
+}
+
+
