@@ -6,7 +6,7 @@ spp <- 'mcav' #choose species
 npops <- 4 #choose number of populations
 #---------------
 
-dir <- paste0('./set1/', spp, '/') # change this to where your scp'd files are
+dir <- paste0('set1/', spp, '/') # change this to where your scp'd files are
 bams <- read.table(paste0(dir, "bams_noclones"))[,1] # list of bam files
 if(spp=='ssid'){
   prefix <- 'ss'
@@ -119,12 +119,11 @@ ggsave(paste0(dir, prefix, 'PCA_k', npops, '_kmeans.png'), height = 6, width = 8
 newClusters=data.frame(cbind(bams,"kmeans"=ks$cluster,"admix"=cluster.admix))
 write.table(newClusters,quote=F,row.names=F,file=paste0(dir,"newClusters_k", npops, "_", spp, ".tab"))
 
-
 # 3D PCA in plot.ly -------------------------------------------------------
 
 library(plotly)
 
-fig <- plot_ly(ks.spider, x = ~MDS1, y = ~MDS2, z = ~MDS3, mode = 'markers', color = ~habitat, symbol = ~age, 
+fig <- plot_ly(pp0.admix, x = ~MDS1, y = ~MDS2, z = ~MDS3, mode = 'markers', color = ~habitat, symbol = ~age, 
                colors = c('skyblue1', 'palegreen1', 'plum1'), marker = list(size=4)) %>% 
   add_markers() %>% 
   layout(scene = list(xaxis = list(title = 'MDS1'),
@@ -135,13 +134,13 @@ p <- plotly_build(fig)
 p$x$data[[2]]$marker$symbol <- 'diamond'
 p
 
-#Output a rotational image series to create a gif
+# Output a rotational image series to create a gif
 for(i in seq(0,6.3,by=0.1)){
   outfile <- paste("PCA",round(i,digits=2), sep = "_")
   cam.zoom = 2
   ver.angle = 0
-  fig <- plot_ly(admix.spider, x = ~MDS1, y = ~MDS2, z = ~MDS3, 
-                 mode = 'markers', color = ~region, symbol = ~rz, 
+  fig <- plot_ly(pp0.admix, x = ~MDS1, y = ~MDS2, z = ~MDS3, 
+                 mode = 'markers', color = ~habitat, symbol = ~age, 
                  colors = c('skyblue1', 'palegreen1', 'plum1'), marker = list(size=4)) %>% 
     add_markers() %>% 
     layout(scene = list(xaxis = list(title = 'MDS1'),
