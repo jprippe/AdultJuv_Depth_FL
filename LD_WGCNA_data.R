@@ -14,7 +14,11 @@ geno=read.table(args[1], sep="\t")
 geno=geno[,-ncol(geno)]
 row.names(geno)=paste(geno[,1],geno[,2],sep=":")
 bams=read.table(args[3])[,1]
-bams=sub(".fastq.bt2.bam","",bams)
+if(spp == 'mcav'){
+  bams=sub(".fastq.bt2.bam","",bams)
+} else if(spp == 'ssid'){
+  bams=sub(".nosymbio.fastq.bam","",bams)
+}
 # remove leader columns from geno file
 cols.rm=ncol(geno) %% length(bams)
 geno=geno[,-c(1:cols.rm)]
@@ -33,12 +37,14 @@ if(indCols==2){
   # -doGeno 10, 11, 12, 13 or 15
 } else if(indCols==4 | indCols==5){
   extra=indCols-3
+  geno_hard=geno[,seq(1, ncol(geno), by=4)]
   geno=data.frame(do.call(cbind, lapply(index, function(i) apply(geno[,i[-c(1:extra)]], 1, function(x) sum(x*c(0,1,2))))))
 } else if(!(indCols %in% c(1:5))){
   stop('Check format of geno file! Incorrect number of columns detected.')
 }
-names(geno)=bams
+names(geno)=names(geno_hard)=bams
 datt=t(geno)
+datt_hard=t(geno_hard)
 #datt=datt+0.01
 datt[1:30,1:4]
 dim(datt)
@@ -63,11 +69,15 @@ if (args[4] == "ssid"){
   c2=read.table("cluster2")[,1]
   c3=read.table("cluster3")[,1]
   c4=read.table("cluster4")[,1]
+  c1.2=read.table("cluster1.2")[,1]
+  c2.4=read.table("cluster2.4")[,1]
   bams=read.table(args[3])[,1]
   k=rep(1,length(bams))
   k[bams %in% c2]=2
   k[bams %in% c3]=3
   k[bams %in% c4]=4
+  k[bams %in% c1.2]=1.2
+  k[bams %in% c2.4]=2.4
   bams=sub(".fastq.bt2.bam","",bams)
   site=gsub("MC|[0-9]|[JA]|c|-","",bams)
   age=gsub("MC|[0-9]|[NOD]|c|-","",bams)
@@ -79,6 +89,8 @@ traits$is1=as.numeric(traits$k==1)
 traits$is2=as.numeric(traits$k==2)
 traits$is3=as.numeric(traits$k==3)
 traits$is4=as.numeric(traits$k==4)
+traits$hyb1.2=as.numeric(traits$k==1.2)
+traits$hyb2.4=as.numeric(traits$k==2.4)
 traits$isA=as.numeric(traits$age=="A")
 traits$isD=as.numeric(traits$site=="D")
 traits$isN=as.numeric(traits$site=="N")
@@ -87,7 +99,8 @@ traits$isO=as.numeric(traits$site=="O")
 # ---------------- Reformatting ngsLD output into square matrix
 LD.long <- fread(args[2], nThread = 20, data.table = F, showProgress = F)
 
-for(i in c('V5','V7')){
+stats2do <- c('V7') #V5: DEM, V7: rEM
+for(i in stats2do){
   if(i == 'V5'){stat <- 'DEM'} else if(i == 'V7'){stat <- 'rEM'}
   ldtab <- dcast(LD.long, V2~V1, value.var = i)
   
@@ -122,4 +135,6 @@ ald3$s2 <- as.character(ald3$s2)
 mafs <- ald3[match(unique(ald3$s1), ald3$s1),]$af1
 names(mafs) <- sites <- unique(ald3$s1)
 
-save(ldmat.sq.rEM, ldmat.sq.DEM, mafs, sites, datt, traits, file = 'LDsquare_datt_traits.RData')
+save(ldmat.sq.rEM, 
+     #ldmat.sq.DEM, 
+     mafs, sites, datt, datt_hard, traits, file = 'LDsquare_datt_traits.RData')
