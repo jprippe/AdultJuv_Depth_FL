@@ -3,8 +3,8 @@ library(ggplot2)
 library(scales)
 library(cowplot)
 
-spp <- 'mcav'
-dir <- paste0('set1/', spp, '/analysis_sfs/moments/')
+spp <- 'ssid'
+dir <- paste0('set1/', spp, '/~denovo/analysis_sfs/moments/')
 files <- list.files(dir)
 
 param.ls <- list()
@@ -47,33 +47,74 @@ times.migs <- lapply(param.ls, function(x) {
   if(length(i) > 0) {x[i, ]} else {NA} 
 })
 
-ratio.df <- data.frame(mod = names(times.migs), m12 = NA, m21 = NA)
+ratio.df <- data.frame(mod = names(times.migs), m12 = NA, m21 = NA, whichIntrogress = NA)
+
+# Define a function to determine which portion of the genome (island or non-island as specified in the model) is experiencing higher migration rates
+whichIsIntrogress <- function(mod){
+  temp.df <- times.migs[[mod]]
+  migs.df <- temp.df[grep("^m", temp.df$Parameter),]
+  migs.df$isl <- ifelse(endsWith(migs.df$Parameter, 'i'), 1, 0)
+  isl.is.introgress <- migs.df$Value[migs.df$isl == 1] > migs.df$Value[migs.df$isl == 0]
+  if (sum(isl.is.introgress) > length(isl.is.introgress)/2) {
+    which.is.introgress <- "isl"
+  } else if (sum(isl.is.introgress) < length(isl.is.introgress)/2) {
+    which.is.introgress <- "non-isl"
+  } else if (sum(isl.is.introgress) == length(isl.is.introgress)/2) {
+    which.is.introgress <- "split"
+  }
+  return(which.is.introgress)
+}
+
 for(mod in names(times.migs)){
   temp.df <- times.migs[[mod]]
+  
+  # Calculate proportional duration of each epoch relative to others
   times <- temp.df[grep("^T", temp.df$Parameter),]
   times$scaleValue <- times$Value / sum(times$Value)
+  
+  # Subset island and non-island migration parameters
   migs <- temp.df[grep("^m", temp.df$Parameter),]
   isl.migs <- migs$Parameter[endsWith(migs$Parameter, 'i')]
   non.isl.migs <- migs$Parameter[!endsWith(migs$Parameter, 'i')]
   
   migs$scaleValue <- NA
   migs$Ratio <- NA
-  for(i in seq(length(non.isl.migs))){
-    mig.par <- non.isl.migs[i]
-    if(length(strsplit(non.isl.migs, '_')[[i]]) == 1){
-      mig.time <- times$Parameter[nrow(times)-1]
-    } else if (length(strsplit(non.isl.migs, '_')[[i]]) == 2){
-      mig.time <- times$Parameter[as.numeric(strsplit(non.isl.migs, '_')[[i]][2])]
-    }
+  
+  # For each migration parameter (paired island and non-island), specify the corresponding epoch
+  # If there is no suffix, the migration rate corresponds to the penultimate epoch
+  # If there is a suffix (_i), the migration rate corresponds to the ith epoch
+  for (mig.par in non.isl.migs){
+    if (nrow(times)>1){
+      if (length(strsplit(mig.par, '_')[[1]]) == 1){
+        mig.time <- times$Parameter[nrow(times)-1]
+      } else if (length(strsplit(mig.par, '_')[[1]]) == 2){
+        mig.time <- times$Parameter[as.numeric(strsplit(mig.par, '_')[[1]][2])]
+      }
+    } else {mig.time <- times$Parameter}
+    
+    # Scale the migration rate by the proportional duration of the epoch relative to other epochs
     migs$scaleValue[migs$Parameter == mig.par] <- migs$Value[migs$Parameter == mig.par] * times$scaleValue[times$Parameter == mig.time]
     migs$scaleValue[migs$Parameter == paste0(mig.par,'i')] <- migs$Value[migs$Parameter == paste0(mig.par,'i')] * times$scaleValue[times$Parameter == mig.time]
     
+    # Calculate the non-island:island ratio of each pair of migration parameters
     migs$Ratio[migs$Parameter == mig.par] <- migs$scaleValue[migs$Parameter == mig.par]/migs$scaleValue[migs$Parameter == paste0(mig.par,'i')]
+    migs$Ratio[migs$Parameter == paste0(mig.par,'i')] <- migs$scaleValue[migs$Parameter == paste0(mig.par,'i')]/migs$scaleValue[migs$Parameter == mig.par]
   }
+  
+  # Subset asymmetrical migration rates in each direction (symmetrical migration included in both directions)
+  # Sum of scaled non-island migration rates divided by sum of scaled island migration rates
   m12 <- migs[c(grep("^m12", migs$Parameter), grep("_", migs$Parameter, invert = T)),]
-  ratio.df$m12[ratio.df$mod == mod] <- sum(m12$scaleValue[!endsWith(m12$Parameter,"i")])/sum(m12$scaleValue[endsWith(m12$Parameter,"i")])
   m21 <- migs[c(grep("^m21", migs$Parameter), grep("_", migs$Parameter, invert = T)),]
-  ratio.df$m21[ratio.df$mod == mod] <- sum(m21$scaleValue[!endsWith(m21$Parameter,"i")])/sum(m21$scaleValue[endsWith(m21$Parameter,"i")])
+  if (whichIsIntrogress(mod) == "non-isl"){
+    ratio.df$m12[ratio.df$mod == mod] <- sum(m12$scaleValue[!endsWith(m12$Parameter,"i")])/sum(m12$scaleValue[endsWith(m12$Parameter,"i")])
+    ratio.df$m21[ratio.df$mod == mod] <- sum(m21$scaleValue[!endsWith(m21$Parameter,"i")])/sum(m21$scaleValue[endsWith(m21$Parameter,"i")])
+  } else if (whichIsIntrogress(mod) == "isl"){
+    ratio.df$m12[ratio.df$mod == mod] <- sum(m12$scaleValue[endsWith(m12$Parameter,"i")])/sum(m12$scaleValue[!endsWith(m12$Parameter,"i")])
+    ratio.df$m21[ratio.df$mod == mod] <- sum(m21$scaleValue[endsWith(m21$Parameter,"i")])/sum(m21$scaleValue[!endsWith(m21$Parameter,"i")])
+  } else {
+    ratio.df$m12[ratio.df$mod == mod] <- ratio.df$m21[ratio.df$mod == mod] <- "split"
+  }
+  ratio.df$whichIntrogress[ratio.df$mod == mod] <- whichIsIntrogress(mod)
 }
 
 pair.tri <- matrix(nrow = 4, ncol = 4)
@@ -94,6 +135,38 @@ for(i in 1:nrow(pgen.df)){
 }
 pair.melt$prop.rescale <- 6-rescale(pair.melt$prop, c(0,5))
 prop.rescale.key <- c(0.1, 0.5, 1)
+
+pgen.pairs2 <- pgen.pairs
+pgen.pairs2$value <- 1-pgen.pairs$value
+pgen.pairs$isl <- "Island"; pgen.pairs2$isl <- "Non-Island"
+pgen.pairs.long <- rbind(pgen.pairs, pgen.pairs2)
+pgen.pairs.long$pair <- factor(paste(gsub("Pop","",pgen.pairs.long$Var1), gsub("Pop","",pgen.pairs.long$Var2), sep = "_"))
+
+pie.list <- list()
+for(i in levels(pgen.pairs.long$pair)){
+  pgen.pie <- ggplot(data = subset(pgen.pairs.long, pair == i), aes(x = "", y = value, fill = isl))+
+    geom_bar(width = 1, stat = "identity")+
+    coord_polar("y", start=0)+
+    scale_fill_grey()+
+    ylab(paste0(as.character(sprintf("%.1f", round(subset(pgen.pairs.long, pair == i & isl == "Island")$value, 3)*100)), "%"))+
+    theme_minimal()+
+    theme(
+      panel.border = element_blank(),
+      panel.grid=element_blank(),
+      axis.title.x = element_text(face = "bold", size = 16),
+      axis.title.y = element_blank(),
+      axis.ticks = element_blank(),
+      axis.text = element_blank(), 
+      legend.position = "none"
+    )
+  pie.list[[i]] <- pgen.pie
+}
+multi.pie <- plot_grid(pie.list$`1_2`, NULL, NULL,
+                       pie.list$`1_3`, pie.list$`2_3`, NULL,
+                       pie.list$`1_4`, pie.list$`2_4`, pie.list$`3_4`,
+                       ncol = 3)
+multi.pie
+save_plot(paste0('set1/', spp, "/~denovo/analysis_sfs/pairwiseIOD_pies_", spp, ".pdf"), multi.pie, base_width = 6, base_height = 5)
 
 pgen.plot <- ggplot(data = pgen.pairs, aes(Var1, Var2)) +
   geom_tile(color = "black", fill = "white") +
@@ -116,10 +189,10 @@ pgen.plot <- ggplot(data = pgen.pairs, aes(Var1, Var2)) +
 
 mig.plot <- ggplot(data = pair.melt, aes(Var2, Var1, fill = value)) +
   geom_tile(color = "black") +
-  scale_fill_gradient2(low = "grey40", high = "grey40", mid = "white", midpoint = 0, limit = c(0,12), space = "Lab", name=expression("log"[2]*"(Ratio)")) +
+  scale_fill_gradient2(low = "grey40", high = "grey40", mid = "white", midpoint = 0, limit = c(0,8), space = "Lab", name=expression("log"[2]*"(Ratio)")) +
   coord_fixed(ratio=0.35) +
-  geom_text(aes(Var2, Var1, label = format(round(value, 1), nsmall = 1)), color = "black", size = 3.5) +
-  theme(axis.text = element_text(vjust = 0.5, size = 10, hjust = 0.5),
+  geom_text(aes(Var2, Var1, label = format(round(value, 1), nsmall = 1)), color = "black", size = 6) +
+  theme(axis.text = element_text(vjust = 0.5, size = 14, hjust = 0.5),
         panel.background = element_blank(),
         axis.ticks = element_blank(),
         plot.title = element_text(face = "bold"),
@@ -134,12 +207,12 @@ mig.plot2 <- mig.plot +
   guides(fill = guide_colorbar(barwidth = 1, barheight = 5, title.position = "top", title.hjust = 0.5))
 
 pgen.plot
-save_plot(paste0('set1/', spp, "/analysis_sfs/pairwiseIOD_prop_", spp, ".pdf"), pgen.plot, base_width = 7, base_height = 4)
+save_plot(paste0('set1/', spp, "/~denovo/analysis_sfs/pairwiseIOD_prop_", spp, ".pdf"), pgen.plot, base_width = 7, base_height = 4)
 mig.plot
 mig.plot2
-save_plot(paste0('set1/', spp, "/analysis_sfs/pairwiseIOD_mig_", spp, "_nolegend.pdf"), mig.plot, base_width = 7, base_height = 4)
-save_plot(paste0('set1/', spp, "/analysis_sfs/pairwiseIOD_mig_", spp, "_legend.pdf"), mig.plot2, base_width = 7, base_height = 4)
+save_plot(paste0('set1/', spp, "/~denovo/analysis_sfs/pairwiseIOD_mig_", spp, "_nolegend.pdf"), mig.plot, base_width = 7, base_height = 4)
+save_plot(paste0('set1/', spp, "/~denovo/analysis_sfs/pairwiseIOD_mig_", spp, "_legend.pdf"), mig.plot2, base_width = 7, base_height = 4)
 
 multi_plot <- plot_grid(plotlist=list(pgen.plot, mig.plot), nrow = 1)
-save_plot(paste0('set1/', spp, "/analysis_sfs/pairwiseIOD_", spp, ".pdf"), multi_plot, base_width = 12, base_height = 6)
+save_plot(paste0('set1/', spp, "/~denovo/analysis_sfs/pairwiseIOD_", spp, ".pdf"), multi_plot, base_width = 12, base_height = 6)
 
