@@ -1,10 +1,10 @@
+library(tidyverse)
 library(reshape2)
-library(ggplot2)
 library(scales)
 library(cowplot)
 
-spp <- 'ssid'
-dir <- paste0('set1/', spp, '/~denovo/analysis_sfs/moments/')
+spp <- 'mcav'
+dir <- paste0('set1/', spp, '/analysis_sfs/moments/')
 files <- list.files(dir)
 
 param.ls <- list()
@@ -161,12 +161,47 @@ for(i in levels(pgen.pairs.long$pair)){
     )
   pie.list[[i]] <- pgen.pie
 }
-multi.pie <- plot_grid(pie.list$`1_2`, NULL, NULL,
-                       pie.list$`1_3`, pie.list$`2_3`, NULL,
-                       pie.list$`1_4`, pie.list$`2_4`, pie.list$`3_4`,
-                       ncol = 3)
+if (spp == 'mcav'){
+  #Rename factor levels to match modified pop ids
+  pair.melt$Var1 <- fct_recode(pair.melt$Var1, Nearshore='Pop1', Offshore='Pop2', Deep1='Pop3', Deep2='Pop4')
+  pair.melt$Var2 <- fct_recode(pair.melt$Var2, Nearshore='Pop1', Offshore='Pop2', Deep1='Pop3', Deep2='Pop4')
+  pgen.pairs$Var1 <- fct_expand(pgen.pairs$Var1, 'Deep2') %>%
+    fct_recode(Nearshore='Pop1', Offshore='Pop2', Deep1='Pop3') %>%
+    fct_relevel('Nearshore', 'Offshore', 'Deep1', 'Deep2')
+  pgen.pairs$Var2 <- fct_expand(pgen.pairs$Var2, 'Nearshore') %>%
+    fct_recode(Offshore='Pop2', Deep1='Pop3', Deep2='Pop4') %>%
+    fct_relevel('Nearshore', 'Offshore', 'Deep1', 'Deep2')
+  
+  #Piecharts displaying proportion of genome with reduced migration rates
+  multi.pie <- plot_grid(pie.list$`1_2`, NULL, NULL,
+                         pie.list$`1_3`, pie.list$`2_3`, NULL,
+                         pie.list$`1_4`, pie.list$`2_4`, pie.list$`3_4`,
+                         ncol = 3)
+} else if (spp == 'ssid'){
+  #Rename and reorder factor levels to match modified pop ids
+  pair.melt$Var1 <- fct_recode(pair.melt$Var1, Shallow1='Pop1', Shallow2='Pop2', Deep2='Pop3', Deep1='Pop4') %>%
+    fct_relevel('Shallow1', 'Shallow2', 'Deep1', 'Deep2')
+  pair.melt$Var2 <- fct_recode(pair.melt$Var2, Shallow1='Pop1', Shallow2='Pop2', Deep2='Pop3', Deep1='Pop4') %>%
+    fct_relevel('Shallow1', 'Shallow2', 'Deep1', 'Deep2')
+  pgen.pairs$Var1 <- fct_expand(pgen.pairs$Var1, 'Deep1') %>%
+    fct_recode(Shallow1='Pop1', Shallow2='Pop2', Deep2='Pop3') %>%
+    fct_relevel('Shallow1', 'Shallow2', 'Deep1', 'Deep2')
+  pgen.pairs$Var2 <- fct_expand(pgen.pairs$Var2, 'Shallow1') %>%
+    fct_recode(Shallow2='Pop2', Deep2='Pop3', Deep1='Pop4') %>%
+    fct_relevel('Shallow1', 'Shallow2', 'Deep1', 'Deep2')
+  #Flip last row indices for plotting
+  pgen.pairs$Var1[6] <- factor('Deep1', levels = levels(pgen.pairs$Var1))
+  pgen.pairs$Var2[6] <- factor('Deep2', levels = levels(pgen.pairs$Var2))
+  
+  #Piecharts displaying proportion of genome with reduced migration rates
+  #(Plot layout rearranged to match modified pop ids)
+  multi.pie <- plot_grid(pie.list$`1_2`, NULL, NULL,
+                         pie.list$`1_4`, pie.list$`2_4`, NULL,
+                         pie.list$`1_3`, pie.list$`2_3`, pie.list$`3_4`,
+                         ncol = 3)
+}
 multi.pie
-save_plot(paste0('set1/', spp, "/~denovo/analysis_sfs/pairwiseIOD_pies_", spp, ".pdf"), multi.pie, base_width = 6, base_height = 5)
+save_plot(paste0('set1/', spp, "/~denovo/analysis_sfs/pairwiseIOD_pies_", spp, "_modified.pdf"), multi.pie, base_width = 4, base_height = 3.3)
 
 pgen.plot <- ggplot(data = pgen.pairs, aes(Var1, Var2)) +
   geom_tile(color = "black", fill = "white") +
@@ -176,8 +211,8 @@ pgen.plot <- ggplot(data = pgen.pairs, aes(Var1, Var2)) +
   #                               format(round(value-uncert, 2), nsmall = 2), " - ",
   #                               format(round(value+uncert, 2), nsmall = 2), ")")),
   #            color = "black", size = 3.5) +
-  geom_text(aes(Var1, Var2, label = paste0(format(round(value, 2), nsmall = 2), " \u00B1 ", 
-                                           format(round(uncert, 2), nsmall = 2))), color = "black", size = 3.5) +
+  geom_text(aes(label = paste0(format(round(value, 2), nsmall = 2), " \u00B1 ", 
+                               format(round(uncert, 2), nsmall = 2))), color = "black", size = 3.5) +
   theme(axis.text = element_text(vjust = 0.5, size = 10, hjust = 0.5),
         panel.background = element_blank(),
         axis.ticks = element_blank(),
@@ -207,12 +242,12 @@ mig.plot2 <- mig.plot +
   guides(fill = guide_colorbar(barwidth = 1, barheight = 5, title.position = "top", title.hjust = 0.5))
 
 pgen.plot
-save_plot(paste0('set1/', spp, "/~denovo/analysis_sfs/pairwiseIOD_prop_", spp, ".pdf"), pgen.plot, base_width = 7, base_height = 4)
+save_plot(paste0('set1/', spp, "/analysis_sfs/pairwiseIOD_prop_", spp, "_modified.pdf"), pgen.plot, base_width = 7, base_height = 4)
 mig.plot
 mig.plot2
-save_plot(paste0('set1/', spp, "/~denovo/analysis_sfs/pairwiseIOD_mig_", spp, "_nolegend.pdf"), mig.plot, base_width = 7, base_height = 4)
-save_plot(paste0('set1/', spp, "/~denovo/analysis_sfs/pairwiseIOD_mig_", spp, "_legend.pdf"), mig.plot2, base_width = 7, base_height = 4)
+save_plot(paste0('set1/', spp, "/analysis_sfs/pairwiseIOD_mig_", spp, "_nolegend_modified.pdf"), mig.plot, base_width = 7, base_height = 4)
+save_plot(paste0('set1/', spp, "/analysis_sfs/pairwiseIOD_mig_", spp, "_legend_modified.pdf"), mig.plot2, base_width = 7, base_height = 4)
 
 multi_plot <- plot_grid(plotlist=list(pgen.plot, mig.plot), nrow = 1)
-save_plot(paste0('set1/', spp, "/~denovo/analysis_sfs/pairwiseIOD_", spp, ".pdf"), multi_plot, base_width = 12, base_height = 6)
+save_plot(paste0('set1/', spp, "/analysis_sfs/pairwiseIOD_", spp, "_modified.pdf"), multi_plot, base_width = 12, base_height = 6)
 
