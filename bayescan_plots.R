@@ -1,20 +1,24 @@
 #install.packages("boa")
 library(boa)
 source('plot_R.r')
-dat=read.table("set1/mcav/mc.baye_fst_pos.txt",header=T)
+dat=read.table("set1/ssid/~denovo/ss.baye_fst_pos.txt", header=T)
 head(dat)
 table(dat[,"qval"]<0.05)
 outs=which(dat[,"qval"]<0.05)
 top100=sort(as.numeric(rownames(head(dat[order(dat$qval,-dat$fst),], 100))))
-plot_bayescan("set1/mcav/mc.baye_fst.txt",FDR=0.05,add_text=F,size=0.5,highlight=outs)
+plot_bayescan("set1/ssid/~denovo/ss.baye_fst.txt",FDR=0.05,add_text=F,size=0.5,highlight=outs)
 outs.df <- dat[outs,]
-write.table(outs.df, "set1/mcav/bayes_outs.txt", row.names = F, col.names = T, quote = F)
+write.table(outs.df, "set1/ssid/~denovo/bayes_outs.txt", row.names = F, col.names = T, quote = F)
 #write.table(top100, "set1/mcav/mc.top100.fst", row.names = F, col.names = F)
 
 #----------------
-mydata=read.table("set1/mcav/mc.baye.sel",colClasses="numeric")
+mydata=read.table("set1/ssid/~denovo/ss.baye.sel",colClasses="numeric")
 head(mydata)
 #quartz()
+bspops <- read.table("set1/ssid/~denovo/bspops", stringsAsFactors = F)
+popids <- unique(bspops$V2)
+names(popids) <- colnames(mydata)[-1]
+
 plot(density(mydata[,"Fst1"]), xlab="Fst", main="Fst posterior distribution",xlim=c(0,0.4),ylim=c(0,500))
 boa.hpd(mydata[,"Fst1"],0.05)
 lines(density(mydata[,"Fst2"]), col = 'red')
@@ -24,3 +28,4 @@ boa.hpd(mydata[,"Fst3"],0.05)
 lines(density(mydata[,"Fst4"]), col = 'blue')
 boa.hpd(mydata[,"Fst4"],0.05)
 
+popids

@@ -1,7 +1,7 @@
 # read about multimodel inference here: 
 # https://pdfs.semanticscholar.org/a696/9a3b5720162eaa75deec3a607a9746dae95e.pdf
 
-dir <- "set1/mcav/analysis_sfs/moments/c34_uf/"
+dir <- "set1/mcav/analysis_sfs/moments/5Aug2020/c34/"
 weight.cutoff=1e-2 # lowest Akaike weight to report a model
 npl=read.table(paste0(dir,"likes"))
 #npl=npl[-grep("i", npl$model),]
@@ -9,7 +9,7 @@ npl=read.table(paste0(dir,"likes"))
 names(npl)=c("model","id","npara","ll")
 #npl$model=as.factor(npl$model)
 
-# finding minimum likelihood for each model
+# finding maximum likelihood for each model
 maxlike=c()
 for (m in unique(npl$model)) {
   sub=subset(npl,model==m)

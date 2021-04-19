@@ -10,11 +10,11 @@ dir <- paste0('set1/', spp, '/') # change this to where your scp'd files are
 bams <- read.table(paste0(dir, "bams_noclones"))[,1] # list of bam files
 if(spp=='ssid'){
   prefix <- 'ss'
-  bams <- sub(".nosymbio.fastq.bam","",bams)
+  bams <- gsub(".nosymbio.fastq.bam","",bams)
 } else if (spp=='mcav'){
   prefix <- 'mc'
-  bams <- sub(".fastq.bt2.bam","",bams)
-  }
+  bams <- gsub(".fastq.bt2.bam","", gsub(".trim.bt2.bam","",bams))
+}
 
 ibsMat <- as.matrix(read.table(paste0(dir,prefix,"1.ibsMat")))
 dimnames(ibsMat) <- list(bams,bams)
@@ -73,8 +73,9 @@ pp=capscale(ibsMat~site,conds)
 
 # eigenvectors
 plot(pp0$CA$eig)
+eigvals <- summary(eigenvals(pp0))
 
-axes2plot=c(1,2)  
+axes2plot=c(3,2)  
 #plot(pp0$CA$u[adults,axes2plot],pch=site[adults],col=cols[adults],cex=1.5)
 #points(pp0$CA$u[juveniles,axes2plot],pch=site[juveniles],col=cols[juveniles])
 #ordispider(pp0$CA$u[,axes2plot],groups=cluster.admix,col="grey80",label=T)
@@ -83,12 +84,16 @@ pp0.admix <- data.frame(id=bams, age=substr(bams,4,4), habitat=substr(bams,3,3),
 admix.spider <- merge(pp0.admix, aggregate(cbind(mean.x=pp0$CA$u[,axes2plot[1]], mean.y=pp0$CA$u[,axes2plot[2]])~admix, pp0.admix, mean), by='admix')
 ggplot(data=admix.spider)+
   theme_bw()+
-  theme(panel.grid = element_blank(), axis.title = element_blank())+
+  theme(panel.grid = element_blank())+
+  labs(x = paste0('MDS', axes2plot[1], ' (', round(eigvals[2,axes2plot[1]]*100,1), '%)'), y = paste0('MDS', axes2plot[2], ' (', round(eigvals[2,axes2plot[2]]*100,1), '%)'))+
   geom_segment(aes_string(x='mean.x', y='mean.y', xend=colnames(pp0$CA$u)[axes2plot[1]], yend=colnames(pp0$CA$u)[axes2plot[2]]), col='grey90')+
   geom_point(aes_string(x=colnames(pp0$CA$u)[axes2plot[1]], y=colnames(pp0$CA$u)[axes2plot[2]], shape='age', col='habitat'), size = 2)+
-  geom_label(aes(x=mean.x, y=mean.y, label=admix))+
+#  geom_label(aes(x=mean.x, y=mean.y, label=admix))+
   scale_color_manual(values = c('skyblue1', 'palegreen1', 'plum1'))
-ggsave(paste0(dir, prefix, 'PCA_k', npops, '_admix_fig1.png'), height = 3, width = 4)
+ggsave(paste0(dir, prefix, 'PCA_k', npops, '_admix_ax23.png'), height = 3, width = 4)
+
+ggplot(data = admix.spider, aes(MDS4, color = admix, fill = admix))+
+  geom_density(alpha = 0.1)
 
 #--------------
 # k-means clustering (instead of admixture-based)

@@ -1,4 +1,8 @@
-source("~/Google Drive/Work/~Research/~Projects_Active/AdultJuv_Depth_FL/work/plot_admixture_v4_function.R")
+#~~~~~~
+# Code for plotting ngsAdmix and PCAngsd results (Figure 1, S2)
+#~~~~~~
+
+source("plot_admixture_v4_function.R")
 
 #---------------
 spp <- 'ssid' #choose species
@@ -6,7 +10,7 @@ npops <- 4 #choose number of populations
 #---------------
 
 # assembling the input table
-dir=paste0("~/Google Drive/Work/~Research/~Projects_Active/AdultJuv_Depth_FL/work/set1/", spp, "/") # path to input files
+dir=paste0("set2/2brad/", spp, "/") # path to input files
 if(spp=='ssid'){
   prefix <- 'ss'
   inName <- paste0('ss_k', npops, '.qopt')
@@ -20,6 +24,10 @@ pops="inds2pops" # 2-column tab-delimited table of individual assignments to pop
 
 npops=as.numeric(sub("\\D+(\\d+)\\..+","\\1",inName))
 tbl=read.table(paste(dir,inName,sep=""),header=F)
+##########
+# OR WITH PCAngsd (Figure S2)
+tbl=as.data.frame(RcppCNPy::npyLoad('set1/mcav/pcangsd/pcangsd.admix.4.Q.npy'))
+##########
 i2p=read.table(paste(dir,pops,sep=""),header=F)
 names(i2p)=c("ind","pop")
 tbl=cbind(tbl,i2p)

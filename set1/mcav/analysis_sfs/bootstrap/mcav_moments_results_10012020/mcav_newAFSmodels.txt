@@ -1,0 +1,119 @@
+# bootstrapping SFS
+>b100
+for B in `seq 1 100`; do
+echo "sleep $B && realSFS c1.saf.idx c3.saf.idx -ref $GENOME_REF -anc $GENOME_REF -bootstrap 5 -P 1 -resample_chr 1 >c13_$B">>b100;
+done
+ls5_launcher_creator.py -j b100 -n b100 -t 2:00:00 -e matz@utexas.edu -w 24 -a tagmap
+sbatch b100.slurm
+
+# bagging
+SFSIZE="75 47" # 2N+1 for each population. In this case we assume that we have sampled 10 diploid individuals from each `p1` and `p2`.
+for B in `seq 1 100`; do
+echo $SFSIZE >c13_${B}.sfs;
+tail -5 c13_${B} | awk '{for (i=1;i<=NF;i++){a[i]+=$i;}} END {for (i=1;i<=NF;i++){printf "%.3f", a[i]/NR; printf "\t"};printf "\n"}' >> c13_${B}.sfs;
+done
+
+# SFS sizes
+75 C1 59
+63 C2 50
+47 C3 37
+17 C4 13
+
+# model selection
+
+Rscript ~/AFS-analysis-with-moments/modSel_write.R contrast=c13 args="c1 c3 59 37 0.02 0.005" nreps=3
+
+# launching this as two jobs
+
+>c13.modsel
+ls5_launcher_creator.py -j c13.modsel.runs -n c13.1 -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c13.1.slurm
+
+ls5_launcher_creator.py -j c13.modsel.runs -n c13.2 -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c13.2.slurm
+
+>c13.winboots
+Rscript ~/AFS-analysis-with-moments/modSel_summary.R modselResult=c13.modsel args="c1 c3 59 37 0.02 0.005" nreps=6
+ls5_launcher_creator.py -j c13.winboots.runs -n c13boots -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c13boots.slurm
+
+
+Rscript ~/AFS-analysis-with-moments/bestBoot_summary.R bootRes=c13.winboots2
+
+# ---------------- other contrasts
+
+cp /work/05703/jprippe/jp_shared/mcav/c14*sfs .
+cp /work/05703/jprippe/jp_shared/mcav/c24*sfs .
+cp /work/05703/jprippe/jp_shared/mcav/c34*sfs .
+cp /work/05703/jprippe/jp_shared/mcav/c12*sfs .
+cp /work/05703/jprippe/jp_shared/mcav/c23*sfs .
+
+Rscript ~/AFS-analysis-with-moments/modSel_write.R contrast=c12 args="c1 c2 59 50 0.02 0.005" nreps=3
+>c12.modsel
+ls5_launcher_creator.py -j c12.modsel.runs -n c12.1 -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c12.1.slurm
+ls5_launcher_creator.py -j c12.modsel.runs -n c12.2 -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c12.2.slurm
+
+Rscript ~/AFS-analysis-with-moments/modSel_write.R contrast=c14 args="c1 c4 59 13 0.02 0.005" nreps=3
+>c14.modsel
+ls5_launcher_creator.py -j c14.modsel.runs -n c14.1 -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c14.1.slurm
+ls5_launcher_creator.py -j c14.modsel.runs -n c14.2 -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c14.2.slurm
+
+Rscript ~/AFS-analysis-with-moments/modSel_write.R contrast=c23 args="c2 c3 50 37 0.02 0.005" nreps=3
+>c23.modsel
+ls5_launcher_creator.py -j c23.modsel.runs -n c23.1 -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c23.1.slurm
+ls5_launcher_creator.py -j c23.modsel.runs -n c23.2 -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c23.2.slurm
+
+Rscript ~/AFS-analysis-with-moments/modSel_write.R contrast=c24 args="c2 c4 50 13 0.02 0.005" nreps=3
+>c24.modsel
+ls5_launcher_creator.py -j c24.modsel.runs -n c24.1 -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c24.1.slurm
+ls5_launcher_creator.py -j c24.modsel.runs -n c24.2 -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c24.2.slurm
+
+Rscript ~/AFS-analysis-with-moments/modSel_write.R contrast=c34 args="c3 c4 37 13 0.02 0.005" nreps=3
+>c34.modsel
+ls5_launcher_creator.py -j c34.modsel.runs -n c34.1 -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c34.1.slurm
+ls5_launcher_creator.py -j c34.modsel.runs -n c34.2 -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c34.2.slurm
+
+#------- bootstrapping winners
+
+>c12.winboots
+Rscript ~/AFS-analysis-with-moments/modSel_summary.R modselResult=c12.modsel args="c1 c2 59 50 0.02 0.005" nreps=6
+ls5_launcher_creator.py -j c12.winboots.runs -n c12boots -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c12boots.slurm
+
+>c14.winboots
+Rscript ~/AFS-analysis-with-moments/modSel_summary.R modselResult=c14.modsel args="c1 c4 59 13 0.02 0.005" nreps=6
+ls5_launcher_creator.py -j c14.winboots.runs -n c14boots -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c14boots.slurm
+
+>c23.winboots
+Rscript ~/AFS-analysis-with-moments/modSel_summary.R modselResult=c23.modsel args="c2 c3 50 37 0.02 0.005" nreps=6
+ls5_launcher_creator.py -j c23.winboots.runs -n c23boots -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c23boots.slurm
+
+>c24.winboots
+Rscript ~/AFS-analysis-with-moments/modSel_summary.R modselResult=c24.modsel args="c2 c4 50 13 0.02 0.005" nreps=6
+ls5_launcher_creator.py -j c24.winboots.runs -n c24boots -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c24boots.slurm
+
+>c34.winboots
+Rscript ~/AFS-analysis-with-moments/modSel_summary.R modselResult=c34.modsel args="c3 c4 37 13 0.02 0.005" nreps=6
+ls5_launcher_creator.py -j c34.winboots.runs -n c34boots -t 1:00:00 -e matz@utexas.edu -w 24 -a tagmap -q normal
+sbatch c34boots.slurm
+
+#---------- summarizing bootstraps
+
+Rscript ~/AFS-analysis-with-moments/bestBoot_summary.R bootRes=c12.winboots
+Rscript ~/AFS-analysis-with-moments/bestBoot_summary.R bootRes=c14.winboots
+Rscript ~/AFS-analysis-with-moments/bestBoot_summary.R bootRes=c23.winboots
+Rscript ~/AFS-analysis-with-moments/bestBoot_summary.R bootRes=c24.winboots
+Rscript ~/AFS-analysis-with-moments/bestBoot_summary.R bootRes=c34.winboots

@@ -42,9 +42,12 @@ if(indCols==2){
 } else if(!(indCols %in% c(1:5))){
   stop('Check format of geno file! Incorrect number of columns detected.')
 }
-names(geno)=names(geno_hard)=bams
+names(geno)=bams
 datt=t(geno)
-datt_hard=t(geno_hard)
+if(exists('geno_hard')){
+  names(geno_hard)=bams
+  datt_hard=t(geno_hard)
+}
 #datt=datt+0.01
 datt[1:30,1:4]
 dim(datt)
@@ -135,6 +138,12 @@ ald3$s2 <- as.character(ald3$s2)
 mafs <- ald3[match(unique(ald3$s1), ald3$s1),]$af1
 names(mafs) <- sites <- unique(ald3$s1)
 
-save(ldmat.sq.rEM, 
-     #ldmat.sq.DEM, 
-     mafs, sites, datt, datt_hard, traits, file = 'LDsquare_datt_traits.RData')
+if(exists('geno_hard')){
+  save(ldmat.sq.rEM, 
+       #ldmat.sq.DEM, 
+       mafs, sites, datt, datt_hard, traits, file = 'LDsquare_datt_traits.RData')
+} else {
+  save(ldmat.sq.rEM, 
+       #ldmat.sq.DEM, 
+       mafs, sites, datt, traits, file = 'LDsquare_datt_traits.RData')
+}
