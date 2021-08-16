@@ -1,0 +1,456 @@
+#   Montastrea cavernosa: micro-environmental specialization
+
+export allo=[TACC allocation]
+export email=[your email]
+export GENOME_FASTA=$WORK/db/Mcav_genome_July2018/Mcavernosa_July2018_phased.fasta
+
+# indexing genome for bowtie2 mapper
+echo 'bowtie2-build $GENOME_FASTA $GENOME_FASTA' >btb
+ls5_launcher_creator.py -j btb -n btb -t 1:00:00 -a $allo -e $email -w 1 -q normal
+sbatch btb.slurm
+
+# samtools index:
+samtools faidx $GENOME_FASTA
+
+# picard index:
+java -jar $TACC_PICARD_DIR/build/libs/picard.jar CreateSequenceDictionary R=$GENOME_FASTA O=$GENOME_DICT
+
+#-------------------
+# downloading and unpacking trimmed M.cavernosa reads
+
+cds
+cd RAD
+cp /corral-repl/utexas/$allo/matz_shared/mcav/MC* .
+
+# unpacking all files and selecting top 1m reads
+>gunz
+for F in `ls *gz`; do echo "gunzip $F" >> gunz; done
+launcher_creator.py -j gunz -n gunz -t 0:10:00 -w 48 -a $allo -e $email -q normal
+sbatch gunz.slurm
+
+#------------------------
+# mapping to genome
+
+2bRAD_bowtie2_launch.pl '\.trim$' $GENOME_FASTA > bt2
+# adding option of parallelizing each bowtie2 call into 4 threads
+cat bt2 | perl -pe 's/bowtie2/bowtie2 -p 4/' >bt24
+ls5_launcher_creator.py -j bt24 -n maps -t 1:00:00 -w 4 -N 4 -a $allo -e $email -q normal
+sbatch maps.slurm
+
+ls *.bt2.sam > sams
+cat sams | wc -l  # number should match number of fastq files: 
+ls *.fastq | wc -l
+
+# find mapping efficiency for a particular input file (MCDA12.fastq in this case)
+grep -E "^[ATGCN]+$" MCDA12.fastq | wc -l | grep -f - maps.e* -A 4
+
+# for all files:
+>alignmentRates
+>align
+for F in `ls *fastq`; do 
+echo "grep -E '^[ATGCN]+$' $F | wc -l | grep -f - maps.e* -A 4 | tail -1 | perl -pe 's/maps\.e\d+-|% overall alignment rate//g' | xargs echo $F.bt2.sam >> alignmentRates" >>align; 
+done
+ls5_launcher_creator.py -j align -n align -t 0:15:00 -w 10 -a $allo -e $email -q normal
+sbatch align.slurm
+
+# "good" samples with mapping efficiencies >25%
+awk '$2>=25' alignmentRates | cut -f 1 -d " " | sort | uniq > goods
+# "bad" samples with mapping efficiencies <25%
+awk '$2<25' alignmentRates | cut -f 1 -d " " > bads
+
+#118/124 goods, 6/124 bads
+
+### proceeding to bams only with samples with mapping efficiency >25% ###
+
+# ----------- making and sorting bam files (compressed sam files)
+
+# next stage is compressing, sorting and indexing the SAM files, so they become BAM files:
+module load samtools
+
+#>s2b
+#for file in `cat goods`; do
+#echo "samtools sort -O bam -o ${file/.sam/}.bam $file && samtools index ${file/.sam/}.bam">>s2b;
+#done
+
+cat goods | perl -pe 's/(\S+)\.sam/samtools view -bS $1\.sam >$1\.unsorted\.bam && samtools sort $1\.unsorted\.bam -o $1\.bam && samtools index $1\.bam/' >s2b
+ls5_launcher_creator.py -j s2b -n s2b -q normal -t 1:00:00 -w 12 -a $allo -e $email
+sbatch s2b.slurm
+
+rm *unsorted*
+ls *bam | wc -l  # should be the same number as number of goods
+ls *bam >bams
+
+# some cleanup
+mkdir raw
+mv *fastq raw
+mv *sam raw
+
+#----------- assessing base qualities and coverage depth
+
+# angsd settings:
+# -minMapQ 20 : only highly unique mappings (prob of erroneous mapping = 1%)
+# -baq 1 : realign around indels (not terribly relevant for 2bRAD reads mapped with --local option) 
+# -maxDepth : highest total depth (sum over all samples) to assess; set to 10x number of samples
+# -uniqueOnly 1 : remove reads that have multiple best hits
+# -remove_bads 1 : removes reads with flag above 255 (not primary, failure or duplicate reads)
+FILTERS="-uniqueOnly 1 -remove_bads 1 -minMapQ 20 -maxDepth 1200"
+
+# TO DO : 
+TODO="-doQsDist 1 -doDepth 1 -doCounts 1 -dumpCounts 2"
+
+# in the following line, -r argument is one chromosome or contig to work with (no need to do this for whole genome as long as the chosen chromosome or contig is long enough)
+# (look up lengths of your contigs in the header of *.sam files if you need)
+angsd -b bams -r 'Sc0000000' -GL 1 $FILTERS $TODO -P 1 -out dd
+
+FILTERS="-uniqueOnly 1 -remove_bads 1 -minMapQ 20 -baq 1 -ref $GENOME_FASTA -maxDepth 1200"
+TODO="-doQsDist 1 -doDepth 1 -doCounts 1 -dumpCounts 2"
+echo "angsd -b bams -GL 1 $FILTERS $TODO -P 1 -out dd">ddd
+ls5_launcher_creator.py -j ddd -n ddd -t 03:00:00 -e $email -w 1 -a $allo -q normal
+sbatch ddd.slurm
+
+# summarizing results (using cannibalized Matteo Fumagalli's script)
+Rscript ~/bin/plotQC.R dd > qranks
+
+# percentages of sites with coverage >5x in each sample, from worst to best:
+cat qranks
+
+# scp dd.pdf to local cpu to view more details. 
+
+# manually remove poorly covered sample(s) from bams
+
+# ========= population structure (based on common polymorphisms) =======
+
+# F I L T E R S :
+# (ALWAYS record your filter settings and explore different combinations to confirm that results are robust.)
+# Suggested filters :
+# -minMapQ 20 : only highly unique mappings (prob of erroneous mapping = 1%)
+# -minQ 30 : only highly confident base calls
+# -minInd 94 : the site must be genotyped in at least 94 individuals (set this to ~ 80% of your total number of your individuals)
+# -snp_pval 1e-5 : high confidence that the SNP is not just sequencing error 
+# -minMaf 0.05 : only common SNPs, with allele frequency 0.05 or more.
+# Note: the last two filters are very efficient against sequencing errors but introduce bias against true rare alleles. It is OK (and even desirable) - UNLESS we want to do AFS analysis. We will generate data for AFS analysis in the next part.
+# also adding  filters against very badly non-HWE sites (such as, all calls are heterozygotes => lumped paralog situation) and sites with really bad strand bias:
+FILTERS="-uniqueOnly 1 -remove_bads 1 -minMapQ 20 -minQ 25 -dosnpstat 1 -doHWE 1 -sb_pval 1e-5 -hetbias_pval 1e-5 -skipTriallelic 1 -minInd 94 -snp_pval 1e-5 -minMaf 0.05"
+
+# T O   D O : 
+# -GL 1 : samtools likelihood model
+# -doGlf 2 : output beagle format (for NGSadmix)
+# -doGeno 2 : hard genotype call (one column per individual - 0,1,2 minor alleles)
+# -doGeno 8 : genotype likelihoods (three columns per individual - likelihood of 0,1,2 minor alleles)
+# -doPost 1 : estimate the posterior genotype probability based on the allele frequency as a prior
+# -doVcf 1 : produce actual genotype calls (for original ADMIXTURE)
+# -doMajorMinor 1 : infer major and minor alleles from genotype likelihood data
+# -doMajorMinor 4 -ref $GENOME_FASTA : use reference allele as major, infer minor allele from genotype likelihoods
+# -doMaf 1 : major and minor is assumed to be known (inferred based on reference, genotype likelihoods or given by user; specified by -doMajorMinor option)
+# -doCounts 1 : count the number of bases across samples and sites
+# -makeMatrix 1 -doIBS 1 -doCov 1 : identity-by-state and covariance matrices based on single-read resampling (robust to variation in coverage across samples)
+TODO="-doMajorMinor 1 -doMaf 1 -doCounts 1 -makeMatrix 1 -doIBS 1 -doCov 1 -doGeno 8 -doVcf 1 -doPost 1 -doGlf 2"
+
+echo "angsd -b bams -GL 1 $FILTERS $TODO -P 1 -out mc0" > mca0
+ls5_launcher_creator.py -j mca0 -n mca0 -t 02:00:00 -e $email -w 1 -a $allo -q normal
+sbatch mca0.slurm
+
+# how many SNPs?
+zcat mc0.mafs.gz | wc -l
+
+# scp mc0.ibsMat and bams to local, use ibs_PCA.R to analyze
+
+#---------------------- ADMIXTURE
+# re-running the same after removing clones (make sure to set FILTERS and TODO variables as above) 
+FILTERS="-uniqueOnly 1 -remove_bads 1 -minMapQ 20 -minQ 25 -dosnpstat 1 -doHWE 1 -sb_pval 1e-5 -hetbias_pval 1e-5 -skipTriallelic 1 -minInd 84 -snp_pval 1e-5 -minMaf 0.05"
+TODO="-doMajorMinor 1 -doMaf 1 -doCounts 1 -makeMatrix 1 -doIBS 1 -doCov 1 -doGeno 8 -doVcf 1 -doPost 1 -doGlf 2"
+echo "angsd -b bams_noclones -GL 1 $FILTERS $TODO -P 1 -out mc1" > mca1
+ls5_launcher_creator.py -j mca1 -n mca1 -t 0:30:00 -e $email -w 1 -a $allo -q normal
+sbatch mca1.slurm
+
+# how many SNPs?
+zcat mc1.mafs.gz | wc -l
+# 8266 loci (minInd 84, minMapQ 20, minQ 25)
+zcat mc2.mafs.gz | wc -l
+# 7677 loci (minInd 88, minMapQ 20, minQ 25)
+zcat mc3.mafs.gz | wc -l
+# 6239 loci (minInd 84, minMapQ 25, minQ 30)
+zcat mc4.mafs.gz | wc -l
+# 6269 loci (minInd 84, minMapQ 25, minQ 25)
+zcat mc5.mafs.gz | wc -l
+# 8226 loci (minInd 84, minMapQ 20, minQ 30)
+
+# NgsAdmix for K from 2 to 6
+idev -A $allo
+for K in `seq 2 6` ; 
+do 
+NGSadmix -likes mc1.beagle.gz -K $K -P 10 -o mc_k${K};
+done
+
+# creating table of correspondences of bams to "populations" (this depends on the way you named your bams...)
+# (you can also make this table in any spreadsheet editor like excel)
+cat bams_noclones | perl -pe 's/\..+//' | perl -pe 's/(M)(\D{2})(\d+c*-*\d*)/$1$2$3\t$1$2/' >inds2pops
+cat inds2pops
+
+# scp *Mat,*qopt,*Q,inds2pops,bams_noclones files to laptop, use ibs_PCA.R to plot PCA and admixturePlotting_v4.R to plot ADMIXTURE
+
+
+#----------------- AFS analysis 
+
+# scp newClusters_mcav.tab file to RAD directory and create cluster files
+for i in `seq 1 $(tail -n +2 newClusters_mcav.tab | cut -d ' ' -f 3 | sort -u | wc -l)`; do
+cat newClusters_mcav.tab | awk -v var="$i" '$3==var {print $1}' | sed 's/$/.fastq.bt2.bam/'  > cluster${i};
+done
+
+grep '1\.2' newClusters_mcav.tab | awk '{print $1".fastq.bt2.bam"}' > cluster1.2
+grep '2\.4' newClusters_mcav.tab | awk '{print $1".fastq.bt2.bam"}' > cluster2.4
+
+#combining all clusters into common list
+cat cluster[1234] >allclusters
+
+# creating list of filtered SNP sites for SFS production (note: no filters that distort allele frequency!):
+# sb - strand bias filter; only use for 2bRAD, GBS or WGS (not for ddRAD or RADseq)
+# hetbias - detects weird heterozygotes because they have unequal representation of alleles (possibly lumped paralogs)
+FILTERS="-minMapQ 30 -minQ 35 -minInd 80 -doHWE 1 -sb_pval 1e-3 -hetbias_pval 1e-3 -skipTriallelic 1 -maxHetFreq 0.5"
+DOS="-doMajorMinor 4 -ref $GENOME_FASTA -doMaf 1 -dosnpstat 1 -doGeno 11 -doPost 2 -doBcf 1"
+echo "angsd -b allclusters -GL 1 $FILTERS $DOS -P 1 -out sfsSites" >sites
+ls5_launcher_creator.py -j sites -n sites -t 0:15:00 -e $email -w 1 -a $allo
+sbatch sites.slurm
+
+# output files: sfsSites.*.gz
+
+## 1110439 loci pass these filters (NOTE: majority are non-variable, use the line below to peek at the called genotypes on the first few lines of sfsSites.geno.gz file)
+
+zcat sfsSites.geno.gz | head -5 | awk -F'\t' 'BEGIN {ORS=" "} {for (i=5;i<=NF;i+=4) {print $i}; print "\n"}'
+
+angsd sites index sites2do
+
+# generate site allele frequency likelihood files for each of the subpopulations
+# these will then be optimized using realSFS, which will estimate the site frequency spectrum (SFS)
+# -doSaf 1: calculate the site allele frequency likelihood based on individual genotype likelihoods assuming HWE
+
+export GENOME_FASTA=$WORK/db/Mcav_genome_July2018/Mcavernosa_July2018_phased.fasta
+TODO="-doSaf 1 -anc $GENOME_FASTA -ref $GENOME_FASTA -doMaf 1 -doMajorMinor 4"
+#TODO="-doSaf 1 -doMaf 1 -doMajorMinor 4 -ref $GENOME_FASTA -doPost 1"
+echo "angsd -sites sites2do -b cluster1 -GL 1 -P 1 $TODO -out c1
+angsd -sites sites2do -b cluster2 -GL 1 -P 1 $TODO -out c2
+angsd -sites sites2do -b cluster3 -GL 1 -P 1 $TODO -out c3
+angsd -sites sites2do -b cluster4 -GL 1 -P 1 $TODO -out c4" >sfs
+ls5_launcher_creator.py -j sfs -n sfs -t 0:15:00 -e $email -w 2 -N 1 -a $allo
+sbatch sfs.slurm
+
+### NOTE: Because major/minor alleles are being inferred based on genotype likelihoods for each population cluster independently, some SNPs can have the opposite major/minor allele assignments. Also, in some cases, the major allele of pop1 can be the minor allele of pop2, but not vice versa (-skipTriallelic 1?).
+
+# generating per-population SFS 
+idev -A $allo
+realSFS c1.saf.idx >c1.sfs & 
+realSFS c2.saf.idx >c2.sfs &
+realSFS c3.saf.idx >c3.sfs &
+realSFS c4.saf.idx >c4.sfs &
+
+# generating dadi-like counts based on posterior probabilities of allele frequencies
+realSFS dadi c1.saf.idx c2.saf.idx -sfs c1.sfs -sfs c2.sfs -ref $GENOME_FASTA -anc $GENOME_FASTA >c12_pc.data &
+realSFS dadi c1.saf.idx c3.saf.idx -sfs c1.sfs -sfs c3.sfs -ref $GENOME_FASTA -anc $GENOME_FASTA >c13_pc.data &
+realSFS dadi c1.saf.idx c4.saf.idx -sfs c1.sfs -sfs c4.sfs -ref $GENOME_FASTA -anc $GENOME_FASTA >c14_pc.data &
+realSFS dadi c2.saf.idx c3.saf.idx -sfs c2.sfs -sfs c3.sfs -ref $GENOME_FASTA -anc $GENOME_FASTA >c23_pc.data &
+realSFS dadi c2.saf.idx c4.saf.idx -sfs c2.sfs -sfs c4.sfs -ref $GENOME_FASTA -anc $GENOME_FASTA >c24_pc.data &
+realSFS dadi c3.saf.idx c4.saf.idx -sfs c3.sfs -sfs c4.sfs -ref $GENOME_FASTA -anc $GENOME_FASTA >c34_pc.data &
+realSFS dadi c1.saf.idx c2.saf.idx c3.saf.idx c4.saf.idx -sfs c1.sfs -sfs c2.sfs -sfs c3.sfs -sfs c4.sfs -ref $GENOME_FASTA -anc $GENOME_FASTA >c1234_pc.data
+
+# converting to dadi-snp format understood by dadi and Moments:
+# (numbers after the input file name are numbers of individuals sampled per population)
+
+# cluster1 : 37	(in/off)
+# cluster2 : 31	(in/off)
+# cluster3 : 23	(deep)
+# cluster4 : 8	(deep)
+
+realsfs2dadi.pl c12_pc.data 37 31 >c12_dadi.data
+realsfs2dadi.pl c13_pc.data 37 23 >c13_dadi.data
+realsfs2dadi.pl c14_pc.data 37 8 >c14_dadi.data
+realsfs2dadi.pl c23_pc.data 31 23 >c23_dadi.data
+realsfs2dadi.pl c24_pc.data 31 8 >c24_dadi.data
+realsfs2dadi.pl c34_pc.data 23 8 >c34_dadi.data
+
+# down-projected 1d AFS for stairwayPlot
+./1dAFS.py c12_dadi.data pop0 67
+mv 1dsfss mc_near.sfs
+./1dAFS.py c23_dadi.data pop0 56
+mv 1dsfss mc_off.sfs
+./1dAFS.py c34_dadi.data pop0 42
+mv 1dsfss mc_deep1.sfs
+./1dAFS.py c34_dadi.data pop1 15
+mv 1dsfss mc_deep2.sfs
+
+
+#=========== Fst: global, per site, and per gene
+
+# recording 2d-SFS priors
+echo "realSFS c1.saf.idx c2.saf.idx -P 24 > p12.sfs ; realSFS fst index c1.saf.idx c2.saf.idx -sfs p12.sfs -fstout p12 
+realSFS c1.saf.idx c3.saf.idx -P 24 > p13.sfs ; realSFS fst index c1.saf.idx c3.saf.idx -sfs p13.sfs -fstout p13 
+realSFS c1.saf.idx c4.saf.idx -P 24 > p14.sfs ; realSFS fst index c1.saf.idx c4.saf.idx -sfs p14.sfs -fstout p14 
+realSFS c2.saf.idx c3.saf.idx -P 24 > p23.sfs ; realSFS fst index c2.saf.idx c3.saf.idx -sfs p23.sfs -fstout p23 
+realSFS c2.saf.idx c4.saf.idx -P 24 > p24.sfs ; realSFS fst index c2.saf.idx c4.saf.idx -sfs p24.sfs -fstout p24 
+realSFS c3.saf.idx c4.saf.idx -P 24 > p34.sfs ; realSFS fst index c3.saf.idx c4.saf.idx -sfs p34.sfs -fstout p34" >fst
+ls5_launcher_creator.py -j fst -n fst -t 0:05:00 -e $email -w 6 -a $allo -q normal
+sbatch fst.slurm
+
+# global Fst between populations
+realSFS fst stats p12.fst.idx
+realSFS fst stats p13.fst.idx
+realSFS fst stats p14.fst.idx
+realSFS fst stats p23.fst.idx
+realSFS fst stats p24.fst.idx
+realSFS fst stats p34.fst.idx
+
+# per-site Fst
+realSFS fst print p12.fst.idx > p12.fst
+realSFS fst print p13.fst.idx > p13.fst
+realSFS fst print p14.fst.idx > p14.fst
+realSFS fst print p23.fst.idx > p23.fst
+realSFS fst print p24.fst.idx > p24.fst
+realSFS fst print p34.fst.idx > p34.fst
+
+
+#============= Network analysis on all sites
+
+# creating list of filtered SNP loci for ngsLD
+FILTERS="-minMapQ 20 -minQ 25 -minInd 84 -doHWE 1 -sb_pval 1e-5 -hetbias_pval 1e-5 -uniqueOnly 1 -remove_bads 1 -skipTriallelic 1 -snp_pval 1e-5 -minMaf 0.05 -maxHetFreq 0.5"
+TODO="-doMajorMinor 4 -ref $GENOME_FASTA -anc $GENOME_FASTA -doMaf 1 -dosnpstat 1 -doGeno 8 -doPost 1 -doBcf 1 --ignore-RG 0 -doCounts 1 -doSaf 1"
+echo "angsd -b bams_noclones -GL 1 $FILTERS $TODO -P 1 -out filtersites" > filtersites
+ls5_launcher_creator.py -j filtersites -n filtersites -t 0:30:00 -e $email -w 1 -a $allo
+sbatch filtersites.slurm
+# 7976 sites (minInd 84)
+
+idev -A $allo
+NS=`zcat filtersites.geno.gz | wc -l`
+NB=`cat bams_noclones | wc -l`
+zcat filtersites.mafs.gz | tail -n +2 | cut -f 1,2 > mcld.sites
+module load gsl
+ngsLD --geno filtersites.geno.gz --probs 1 --n_ind $NB --n_sites $NS --max_kb_dist 0 --pos mcld.sites --out mcld_gl.LD --n_threads 12 --extend_out 1
+exit
+
+# scp LD_WGCNA_data.R to main project directory
+
+# 1st argument is geno file
+# 2nd argument is ngsLD file calculated from genotype likelihoods (-doGeno 8)
+# 3rd argument must be same bam file list as was used in generation of the genotype file in angsd above
+# 4th argument is species id (mcav or ssid)
+echo "Rscript --vanilla LD_WGCNA_data.R mcld_gl_hetfilt.geno.gz mcld_gl_hetfilt.LD bams_noclones mcav" > lddat_gl_hetfilt_bamsnc	
+ls5_launcher_creator.py -j lddat_gl_hetfilt_bamsnc -n lddat_gl_hetfilt_bamsnc -t 00:10:00 -w 1 -a $allo -e $email
+sbatch lddat_gl_hetfilt_bamsnc.slurm
+
+# Calculating LD decay
+echo "Rscript --vanilla --slave fit_LDdecay.R --ld_files ld_files --fit_level=1 --seed=1234 --plot_data --plot_x_lim=250 --out ld_decay_1.pdf
+Rscript --vanilla --slave fit_LDdecay.R --ld_files ld_files --fit_level=2 --seed=1234 --plot_data --plot_x_lim=250 --out ld_decay_2.pdf
+Rscript --vanilla --slave fit_LDdecay.R --ld_files ld_files --fit_level=3 --seed=1234 --plot_data --plot_x_lim=250 --out ld_decay_3.pdf" > ngsLD_decay
+ls5_launcher_creator.py -j ngsLD_decay -n ngsLD_decay -t 0:20:00 -e $email -w 2 -N 1 -a $allo
+sbatch ngsLD_decay.slurm
+
+# scp LDsquare_datt_traits.RData to local computer and use LD_WGCNA_analysis.R to run WGCNA steps
+
+
+#============= Bayescan: looking for Fst outliers
+
+# Converting vcf (using PGDspider) to Bayescan format: 
+
+# make tab-delimited file called bspops LISTING assignments of individuals (as they are named in the vcf file) to populations, for example:
+ind1	pop0
+ind2	pop0
+ind3	pop1
+ind4	pop1
+
+grep '#CHROM' sfsSites.bcf | cut -f 10- | paste -d "\t" | tr -s '\t' '\n' >vcfinds
+
+R
+a <- data.frame(read.table('vcfinds', header=F))
+colnames(a) <- 'ids'
+a$bams <- unlist(lapply(strsplit(as.character(a$ids), '\\.'), function(x) x[1]))
+b <- read.table('newClusters_mcav.tab', header=T)
+c <- merge(a, b, sort = F)[,c(2,4)]
+c$admix <- paste0('pop', c$admix)
+write.table(c, 'bspops', row.names = F, col.names = F, quote = F, sep = '\t')
+q()
+
+#awk '{print $2}' newClusters_mcav.tab | tail -n +2 | sed 's/^/pop/' | paste -d "\t" vcfinds - >bspops 
+
+# create a file called vcf2bayescan.spid containing this text:
+echo "############
+# VCF Parser questions
+PARSER_FORMAT=VCF
+# Do you want to include a file with population definitions?
+VCF_PARSER_POP_QUESTION=true
+# Only input following regions (refSeqName:start:end, multiple regions: whitespace separated):
+VCF_PARSER_REGION_QUESTION=
+# What is the ploidy of the data?
+VCF_PARSER_PLOIDY_QUESTION=DIPLOID
+# Only output following individuals (ind1, ind2, ind4, ...):
+VCF_PARSER_IND_QUESTION=
+# Output genotypes as missing if the read depth of a position for the sample is below:
+VCF_PARSER_READ_QUESTION=
+# Take most likely genotype if "PL" or "GL" is given in the genotype field?
+VCF_PARSER_PL_QUESTION=true
+# Do you want to exclude loci with only missing data?
+VCF_PARSER_EXC_MISSING_LOCI_QUESTION=false
+# Select population definition file:
+VCF_PARSER_POP_FILE_QUESTION=./bspops_sfs
+# Only output SNPs with a phred-scaled quality of at least:
+VCF_PARSER_QUAL_QUESTION=
+# Do you want to include non-polymorphic SNPs?
+VCF_PARSER_MONOMORPHIC_QUESTION=false
+# Output genotypes as missing if the phred-scale genotype quality is below:
+VCF_PARSER_GTQUAL_QUESTION=
+# GESTE / BayeScan Writer questions
+WRITER_FORMAT=GESTE_BAYE_SCAN
+# Specify which data type should be included in the GESTE / BayeScan file  (GESTE / BayeScan can only analyze one data type per file):
+GESTE_BAYE_SCAN_WRITER_DATA_TYPE_QUESTION=SNP
+############" >vcf2bayescan_sfs.spid
+
+# converting vcf (either myresult.vcf from ANGSD or the one from GATK) to bayescan format
+# if memory error occurs, max memory can be increased with the -Xmx option (1024m = 1,024 MB)
+#gunzip mc1.vcf.gz
+
+module load TACC-largemem
+echo '#!/bin/bash
+#SBATCH -J bscn_sfs
+#SBATCH -n 1
+#SBATCH -N 1
+#SBATCH -p largemem512GB
+#SBATCH -o bscn_sfs.o%j
+#SBATCH -e bscn_sfs.e%j
+#SBATCH -t 6:00:00
+#SBATCH -A $allo
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=$email
+
+java -Xmx1024m -Xms512m -jar ~/bin/PGDSpider_2.1.1.5/PGDSpider2-cli.jar -inputfile sfsSites.bcf -outputfile mc.bayescan -spid vcf2bayescan_sfs.spid 
+
+echo "bayescan mc.bayescan -threads=20" >bscn
+ls5_launcher_creator.py -j bscn -n bscn -t 2:00:00 -w 1 -a $allo -e $email
+sbatch bscn.slurm
+
+cut -d" " -f2- mc.baye_fst.txt > aaa
+tail --lines=+5202 filtersites.bcf | cut -f 1,2 | paste --delimiters "\t" - aaa > mc.baye_fst_pos.txt
+
+# use bayescan_plots.R to examine results
+
+# removing outliers from VCF file
+removeBayescanOutliers.pl bayescan=mc.baye_fst.txt vcf=mc1.vcf FDR=0.05 >mc1_nobs.vcf
+
+
+#============= 1dSFS for StairwayPlot
+
+# Identify sites with q-value < 0.5
+awk '$5<0.5 {print $1"\t"$2}' mc.baye_fst_pos.txt > mc_bayeOuts
+grep -vf mc_bayeOuts sites2do > sites2do_filtBaye
+angsd sites index sites2do_filtBaye
+
+TODO="-doSaf 1 -anc $GENOME_FASTA -ref $GENOME_FASTA -doMaf 1 -doMajorMinor 4"
+echo "angsd -sites sites2do_filtBaye -b cluster1 -GL 1 -P 1 $TODO -out c1
+angsd -sites sites2do_filtBaye -b cluster2 -GL 1 -P 1 $TODO -out c2
+angsd -sites sites2do_filtBaye -b cluster3 -GL 1 -P 1 $TODO -out c3
+angsd -sites sites2do_filtBaye -b cluster4 -GL 1 -P 1 $TODO -out c4" >sfs_filtBaye
+ls5_launcher_creator.py -j sfs_filtBaye -n sfs_filtBaye -t 0:15:00 -e $email -w 2 -N 1 -a $allo
+sbatch sfs_filtBaye.slurm
+
+# generating per-population SFS 
+idev -A $allo
+realSFS c1.saf.idx >mc_near.sfs & 
+realSFS c2.saf.idx >mc_off.sfs &
+realSFS c3.saf.idx >mc_deep1.sfs &
+realSFS c4.saf.idx >mc_deep2.sfs &
