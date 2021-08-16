@@ -1,0 +1,97 @@
+#============= Bootstrapping SFS analysis with moments
+
+export allo=[TACC allocation]
+export email=[your email]
+export GENOME_FASTA=$WORK/db/Mcav_genome_July2018/Mcavernosa_July2018_phased.fasta
+
+mkdir analysis_sfs_boot
+cd analysis_sfs_boot
+
+sed 's/^/..\//' ../cluster1 > p1.bams
+sed 's/^/..\//' ../cluster2 > p2.bams
+sed 's/^/..\//' ../cluster3 > p3.bams
+sed 's/^/..\//' ../cluster4 > p4.bams
+
+cat p1.bams p2.bams > p12.bams
+cat p1.bams p3.bams > p13.bams
+cat p1.bams p4.bams > p14.bams
+cat p2.bams p3.bams > p23.bams
+cat p2.bams p4.bams > p24.bams
+cat p3.bams p4.bams > p34.bams
+
+# Let's assume we have two populations, p1 and p2, and we have two text files, p1.bams and p2.bams, listing \*.bam files for each population. First we need to collect sites (variable and invariable!) that pass our filters in both populations:
+# add `-sb_pval 1e-5` (strand bias) to FILTERS if you have 2bRAD, GBS, or WGS data, but not if you have used any other type of RAD it would only sequence one strand.
+GRate=0.8 # genotyping rate filter - a site must be genotyped in this fraction of all samples.
+>grate_filt
+for i in p12 p13 p14 p23 p24 p34; do
+export NIND=`cat $i.bams | wc -l`; 
+export MI=`echo "($NIND*$GRate+0.5)/1" | bc`;
+TODO='-doMajorMinor 1 -doMaf 1 -dosnpstat 1 -doPost 2 -doGeno 11'
+FILTERS="-uniqueOnly 1 -skipTriallelic 1 -minMapQ 30 -minQ 30 -doHWE 1 -maxHetFreq 0.5 -hetbias_pval 1e-5 -minInd $MI -sb_pval 1e-5";
+echo "angsd -b ${i}.bams -GL 1 -P 4 $FILTERS $TODO -out ${i}" >> grate_filt
+done
+ls5_launcher_creator.py -j grate_filt -n grate_filt -t 1:30:00 -e $email -w 3 -N 2 -a $allo -q normal
+sbatch grate_filt.slurm
+
+# Next, we use the same goodsites to obtain SAF data for both populations:
+>mk_2dsfs
+TODO="-doSaf 1 -doMajorMinor 1 -doMaf 1 -doPost 1 -anc $GENOME_FASTA -ref $GENOME_FASTA"
+for i in p12 p13 p14 p23 p24 p34; do
+#mkdir ${i}_boots;
+zcat ${i}.mafs.gz | cut -f 1,2 | tail -n +2 > ./${i}_boots/goodsites_${i};
+sleep 1;
+angsd sites index ./${i}_boots/goodsites_${i};
+POP0=$(echo $i| cut -c 1,2);
+POP1=$(echo $i| cut -c 1,3);
+echo "angsd -sites ./${i}_boots/goodsites_${i} -b ${POP0}.bams -GL 1 -P 4 $TODO -out ./${i}_boots/${i}_${POP0}
+angsd -sites ./${i}_boots/goodsites_${i} -b ${POP1}.bams -GL 1 -P 1 $TODO -out ./${i}_boots/${i}_${POP1}" >> mk_2dsfs;
+done
+ls5_launcher_creator.py -j mk_2dsfs -n mk_2dsfs -t 4:00:00 -e $email -w 1 -N 6 -a $allo -q normal
+sbatch mk_2dsfs.slurm
+
+# Now we generate the bootstrapped data (100 series of 6 bootstraps):
+for i in p12 p13; do
+POP0=$(echo $i| cut -c 1,2);
+POP1=$(echo $i| cut -c 1,3);
+>b100_$i
+for B in `seq 1 100`; do
+echo "sleep $B && realSFS ./${i}_boots/${i}_${POP0}.saf.idx ./${i}_boots/${i}_${POP1}.saf.idx -ref $GENOME_FASTA -anc $GENOME_FASTA -bootstrap 6 -P 1 -resample_chr 1 -fold 1 > ./${i}_boots/${i}_${B}" >> b100_$i;
+done
+ls5_launcher_creator.py -j b100_$i -n b100_$i -t 6:00:00 -e $email -w 1 -a $allo -q normal
+sbatch b100_$i.slurm
+done
+
+# Finally, we do "bagging" (averaging of 5 bootstrap replicates within each of the 100 series):
+for i in p12 p13 p14 p23 p24 p34; do
+POP0=$(echo $i| cut -c 1,2);
+POP1=$(echo $i| cut -c 1,3);
+NIND0=$(cat $POP0.bams | wc -l);
+NIND1=$(cat $POP1.bams | wc -l);
+let "SFSIZE0 = $NIND0 * 2 + 1";
+let "SFSIZE1 = $NIND1 * 2 + 1";
+SFSIZE="${SFSIZE0} ${SFSIZE1}"
+for B in `seq 1 100`; do
+echo $SFSIZE >./${i}_boots/${i}_${B}.sfs;
+tail -5 ./${i}_boots/${i}_${B} | awk '{for (x=1;x<=NF;x++){a[x]+=$x;}} END {for (x=1;x<=NF;x++){printf "%.3f", a[x]/NR; printf "\t"};printf "\n"}' >>./${i}_boots/${i}_${B}.sfs;
+done;
+done
+
+# cd to relevant directory with 100 sfs
+# population projections should be 2N * 0.8
+Rscript ~/AFS-analysis-with-moments/modSel_write.R contrast=p34 args="p3 p4 14 32 0.02 0.005" folded=T
+ls5_launcher_creator.py -j p34.modsel.runs -n p34.modsel.runs -t 2:00:00 -w 48 -a $allo -e $email -q normal
+sbatch p34.modsel.runs.slurm
+
+Rscript ~/AFS-analysis-with-moments/modSel_summary.R modselResult=p34.modsel args="p3 p4 14 32 0.02 0.005" folded=T
+ls5_launcher_creator.py -j p34.winboots.runs -n p34.winboots.runs -t 2:00:00 -w 48 -a $allo -e $email -q normal
+sbatch p34.winboots.runs.slurm
+
+Rscript ~/AFS-analysis-with-moments/bestBoot_summary.R bootRes=p34.winboots folded=T
+
+# scp these files to local directory
+p12.winboots.res_bootres.RData
+p12.winboots.res_plots.pdf
+p12.winboots.res_representativeModel.pdf
+p12.winboots.res_representativeModel.png
+p12_modsel_top10medians.pdf
+p12_modsel_allBoxplots.pdf
