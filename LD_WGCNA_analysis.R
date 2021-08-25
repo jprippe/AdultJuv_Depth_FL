@@ -444,7 +444,7 @@ for (i in 1:length(coords)) {
 coo=data.frame(coo)
 names(coo)=c("contig","pos")
 coo$contig=as.character(coo$contig)
-coo$pos=as.numeric(coo$pos)
+coo$pos=as.numeric(as.character(coo$pos))
 str(coo)
 
 # Generate module-specific data frames reporting only kME for each SNP in each corresponding module
